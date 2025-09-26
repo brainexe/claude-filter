@@ -92,6 +92,7 @@ func NewProxyServer() (*ProxyServer, error) {
 	}
 
 	// Initialize gitleaks detector with default config
+	// todo customize
 	detector, err := detect.NewDetectorDefaultConfig()
 	if err != nil {
 		logFile.Close()
@@ -111,6 +112,7 @@ func (p *ProxyServer) Start() error {
 	fmt.Printf("Starting proxy server on port %d\n", p.port)
 
 	server := &http.Server{
+		// todo ipv6
 		Addr:    fmt.Sprintf("127.0.0.1:%d", p.port),
 		Handler: http.HandlerFunc(p.handleRequest),
 	}
@@ -123,6 +125,12 @@ func (p *ProxyServer) GetPort() int {
 }
 
 func (p *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
+	// Handle CONNECT requests for HTTPS tunneling
+	if r.Method == "CONNECT" {
+		p.handleConnect(w, r)
+		return
+	}
+
 	// Create log entry
 	entry := LogEntry{
 		Timestamp: time.Now().Format(time.RFC3339),
@@ -245,6 +253,76 @@ func (p *ProxyServer) forwardRequest(r *http.Request, bodyBytes []byte) (*http.R
 	return client.Do(req)
 }
 
+func (p *ProxyServer) handleConnect(w http.ResponseWriter, r *http.Request) {
+	// For HTTPS requests to api.anthropic.com, we need to intercept the traffic
+	if strings.Contains(r.URL.Host, "api.anthropic.com") {
+		p.handleHTTPSIntercept(w, r)
+		return
+	}
+
+	// For other hosts, just tunnel through normally
+	p.handleTunnel(w, r)
+}
+
+func (p *ProxyServer) handleHTTPSIntercept(w http.ResponseWriter, r *http.Request) {
+	// This is more complex - we need to act as a man-in-the-middle
+	// For now, let's use a simpler approach and tunnel through but log the host
+	// todo ipv6
+	destConn, err := net.DialTimeout("tcp", r.URL.Host, 10*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer destConn.Close()
+
+	w.WriteHeader(http.StatusOK)
+
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+		return
+	}
+
+	clientConn, _, err := hijacker.Hijack()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer clientConn.Close()
+
+	// Copy data between client and destination
+	go io.Copy(destConn, clientConn)
+	io.Copy(clientConn, destConn)
+}
+
+func (p *ProxyServer) handleTunnel(w http.ResponseWriter, r *http.Request) {
+	destConn, err := net.DialTimeout("tcp", r.URL.Host, 10*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer destConn.Close()
+
+	w.WriteHeader(http.StatusOK)
+
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+		return
+	}
+
+	clientConn, _, err := hijacker.Hijack()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer clientConn.Close()
+
+	// Copy data between client and destination
+	go io.Copy(destConn, clientConn)
+	io.Copy(clientConn, destConn)
+}
+
 func (p *ProxyServer) detectCredentials(content string) []CredentialDetection {
 	var detections []CredentialDetection
 
@@ -357,9 +435,6 @@ func (p *ProxyServer) logEntry(entry LogEntry) {
 	}
 
 	p.logFile.Sync()
-
-	// Also print human-readable output to console for debugging
-	fmt.Printf("%s %s", entry.Timestamp, entry.URL)
 
 	if len(entry.Credentials) > 0 {
 		fmt.Printf("\n  ⚠️  CREDENTIAL DETECTED: Found %d potential credential(s)", len(entry.Credentials))

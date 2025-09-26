@@ -58,12 +58,11 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start Claude CLI in goroutine
-	wg.Add(1)
 	claudeFinished := make(chan error, 1)
-	go func() {
+	wg.Go(func() {
 		defer wg.Done()
 		claudeFinished <- cmd.Run()
-	}()
+	})
 
 	// Wait for either Claude to finish or signal
 	select {
@@ -88,12 +87,13 @@ func main() {
 		close(done)
 	}()
 
-	select {
-	case <-done:
-		fmt.Println("All processes stopped")
-	case <-time.After(5 * time.Second):
-		fmt.Println("Timeout waiting for processes to stop")
-	}
+	// todo forward signal to claude
+	//	select {
+	//	case <-done:
+	//		fmt.Println("All processes stopped")
+	//	case <-time.After(5 * time.Second):
+	//		fmt.Println("Timeout waiting for processes to stop")
+	//	}
 
 	fmt.Println("Logs written to request.log")
 }
