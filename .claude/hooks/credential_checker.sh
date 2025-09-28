@@ -156,12 +156,15 @@ if [[ $GITLEAKS_EXIT_CODE -eq 0 ]]; then
     exit 0
 fi
 
-echo "🚨 **CREDENTIAL ALERT** ($TOOL_NAME tool)" >&2
-echo "" >&2
-echo "**Gitleaks detected otential credential(s) in the $TOOL_NAME output:**" >&2
-echo "" >&2
+# Prepare gitleaks findings for JSON output
+GITLEAKS_FINDINGS=$(head -n 2 "$TEMP_RESULT" | sed 's/"/\\"/g' | tr '\n' ' ')
 
-# Show first few lines of findings
-head -n 10 "$TEMP_RESULT" | sed 's/^/  /' >&2
+# Output JSON format for credential detection
+cat << EOF
+{
+  "decision": "block",
+  "reason": "Gitleaks detected potential credential(s) in the $TOOL_NAME output: $GITLEAKS_FINDINGS"
+}
+EOF
 
 exit 2
