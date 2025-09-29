@@ -132,11 +132,7 @@ fi
 
 # Run gitleaks on the output
 TEMP_RESULT=$(mktemp)
-TEMP_INPUT=$(mktemp)
-trap "rm -f $TEMP_RESULT $TEMP_INPUT" EXIT
-
-# Save input to temporary file for gitleaks
-echo "$COMMAND_OUTPUT" > "$TEMP_INPUT"
+trap "rm -f $TEMP_RESULT" EXIT
 
 log "Running gitleaks on $TOOL_NAME output..."
 # Run gitleaks and capture both stdout and stderr
@@ -156,15 +152,18 @@ if [[ $GITLEAKS_EXIT_CODE -eq 0 ]]; then
     exit 0
 fi
 
-# Prepare gitleaks findings for JSON output
-GITLEAKS_FINDINGS=$(head -n 2 "$TEMP_RESULT" | sed 's/"/\\"/g' | tr '\n' ' ')
+# Prepare gitleaks findings for JSON output - get first line only and escape properly
+GITLEAKS_FINDINGS=$(head -n 1 "$TEMP_RESULT" | sed 's/"/\\"/g' | sed 's/$//')
+
+log "Preparing block response with findings: ${GITLEAKS_FINDINGS}"
 
 # Output JSON format for credential detection
 cat << EOF
 {
   "decision": "block",
-  "reason": "Gitleaks detected potential credential(s) in the $TOOL_NAME output: $GITLEAKS_FINDINGS"
+  "reason": "Gitleaks detected potential credential(s) in the ${TOOL_NAME} output: ${GITLEAKS_FINDINGS}"
 }
 EOF
 
+log "Block response sent, exiting with code 2"
 exit 2
